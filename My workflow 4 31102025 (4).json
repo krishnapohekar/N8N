@@ -1,0 +1,934 @@
+{
+  "name": "My workflow 4 31102025",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "admin-config-step1",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        16,
+        64
+      ],
+      "id": "bcac782e-17fb-440b-97b7-dffe430892bd",
+      "name": "Webhook2",
+      "webhookId": "5e69df3d-b2d1-41cd-85e5-9b51f65dfb97"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all incoming items\nconst allItems = $input.all();\n\n// Separate config items\nconst configItems = allItems.filter(\n  i => i.json && i.json.config_key && i.json.config_value\n);\n\nfunction safe(s) {\n  if (s === null || s === undefined) return '';\n  return String(s)\n    .replace(/'/g, '&#39;')\n    .replace(/\"/g, '&quot;');\n}\n\n// Extract config values\nconst config = {\n  dev_server: configItems.find(i => i.json.config_key === 'selected_dev_server_name')?.json.config_value,\n  prod_server: configItems.find(i => i.json.config_key === 'selected_prod_server_name')?.json.config_value\n};\n\n// Relative webhook URL (CORRECT)\nconst postUrl = \"/webhook/admin-config-step2\";\n\n// Build HTML\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <title>Admin Config: Step 1</title>\n  <style>\n    body { font-family: Arial; padding: 40px; }\n    .container { max-width: 600px; margin: auto; }\n    label { display: block; margin-top: 15px; }\n    input { width: 100%; padding: 8px; margin-top: 5px; }\n    button { margin-top: 25px; padding: 10px 15px; }\n  </style>\n</head>\n<body>\n<div class=\"container\">\n  <h1>Step 1: Set Server Connections</h1>\n\n  <form action=\"${postUrl}\" method=\"POST\">\n    <h3>Development</h3>\n    <label>Development Server Name</label>\n    <input type=\"text\" name=\"dev_server\"\n      value=\"${safe(config.dev_server || '')}\" required>\n\n    <h3>Production</h3>\n    <label>Production Server Name</label>\n    <input type=\"text\" name=\"prod_server\"\n      value=\"${safe(config.prod_server || '')}\" required>\n\n    <button type=\"submit\">Next: Select Databases</button>\n  </form>\n</div>\n</body>\n</html>\n`;\n\n// IMPORTANT: must return array\nreturn [\n  {\n    json: {\n      htmlResponse: html\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        64
+      ],
+      "id": "3cb156a5-f3ed-4060-85cd-484aa1371378",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.htmlResponse }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        640,
+        64
+      ],
+      "id": "f9a7980a-06f8-443b-a2ee-506abafb62a2",
+      "name": "Respond to Webhook2"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "admin-config-step2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -448,
+        432
+      ],
+      "id": "13c37d13-de20-41f6-b8fa-9e6e6283a7a5",
+      "name": "Webhook3",
+      "webhookId": "5e69df3d-b2d1-41cd-85e5-9b51f65dfb97"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mssql = require('mssql');\n\n// *** ENTER YOUR SHARED CREDENTIALS HERE ***\nconst SHARED_USER = \"sa\";\nconst SHARED_PASSWORD = \"dot@123\";\n// *******************************************\n\n// Get the first input item (from the webhook)\nconst inputData = $input.all()[0].json.body;\nconst devServer = inputData.dev_server;\n\nconst config = {\n    user: SHARED_USER, \n    password: SHARED_PASSWORD, \n    server: devServer, \n    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },\n    options: { \n        encrypt: true, \n        trustServerCertificate: true \n    }\n};\n\nconst query = \"SELECT name FROM sys.databases WHERE database_id > 4 AND state = 0 ORDER BY name;\";\n\ntry {\n    const pool = new mssql.ConnectionPool(config);\n    await pool.connect(); \n    const result = await pool.query(query);\n    await pool.close(); \n\n    // Return an array of n8n items\n    return result.recordset.map(item => ({ json: { db_name: item.name, type: 'dev' } }));\n\n} catch (err) {\n    // Also return an array\n    return [{ json: { error: `Failed to connect to Dev Server (${devServer}): ${err.message}` } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        784
+      ],
+      "id": "63356188-479f-4a6f-bd85-7901ad0a899c",
+      "name": "Fetch Dev DBs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Always read ONLY from input\nconst input = $input.first().json;\n\nconst devServer = input.dev_server;\nconst prodServer = input.prod_server;\nconst devDatabases = input.dev_databases || [];\nconst prodDatabases = input.prod_databases || [];\n\n// Build options\nconst devDbOptions = devDatabases\n  .map(db => `<option value=\"${db}\">${db}</option>`)\n  .join('');\n\nconst prodDbOptions = prodDatabases\n  .map(db => `<option value=\"${db}\">${db}</option>`)\n  .join('');\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <title>Step 2: Select Databases</title>\n  <style>\n    body { font-family: Arial; padding: 40px; }\n    select { width: 300px; padding: 6px; }\n    button { margin-top: 20px; padding: 8px 16px; }\n  </style>\n</head>\n<body>\n\n<h2>Step 2: Select Databases</h2>\n\n<form method=\"POST\" action=\"/webhook/admin-config-save\">\n\n<h3>Development</h3>\n<p>Server: <b>${devServer}</b></p>\n<input type=\"hidden\" name=\"dev_server\" value=\"${devServer}\">\n<select name=\"dev_database\">\n  ${devDbOptions}\n</select>\n\n<h3>Production</h3>\n<p>Server: <b>${prodServer}</b></p>\n<input type=\"hidden\" name=\"prod_server\" value=\"${prodServer}\">\n<select name=\"prod_database\">\n  ${prodDbOptions}\n</select>\n\n<br/>\n<button type=\"submit\">Save Configuration</button>\n\n</form>\n\n</body>\n</html>\n`;\n\nreturn [{ json: { htmlResponse: html } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        368
+      ],
+      "id": "6634173b-af43-4c7f-b8fa-f57a57e4cf1c",
+      "name": "Generate HTML - Page 2"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.htmlResponse }}\n",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2016,
+        368
+      ],
+      "id": "8cd2fcb5-545f-4e52-86fe-a5f3551365b6",
+      "name": "Respond to Webhook3"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "admin-config-save",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -128,
+        1328
+      ],
+      "id": "86235046-8700-44a7-aa57-4981be9766d7",
+      "name": "Webhook4",
+      "webhookId": "5e69df3d-b2d1-41cd-85e5-9b51f65dfb97"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_config\nSET config_value = '{{ $json.body.dev_server }}'\nWHERE config_key = 'selected_dev_server_name';\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        192,
+        1184
+      ],
+      "id": "44817444-7558-40b9-97c2-94b1637145f6",
+      "name": "Save Dev Server",
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_config\nSET config_value = '{{ $json.body.dev_database }}'\nWHERE config_key = 'selected_dev_database_name';\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        1312
+      ],
+      "id": "8c13f3ac-25d8-4c20-a6cd-5aa495a02e47",
+      "name": "Save Dev DB",
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_config\nSET config_value = '{{ $json.body.prod_server }}'\nWHERE config_key = 'selected_prod_server_name';\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        1472
+      ],
+      "id": "fb26a2ea-939d-4273-bb7d-77cfed661c67",
+      "name": "Save Prod Server",
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_config\nSET config_value = '{{ $json.body.prod_database }}'\nWHERE config_key = 'selected_prod_database_name';\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        256,
+        1632
+      ],
+      "id": "45bc80f7-7207-4835-9159-6bac2c943ee5",
+      "name": "Save Prod DB",
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        496,
+        1296
+      ],
+      "id": "e25fe76a-2957-4e63-bcb5-5909b6eb8b14",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "http://localhost:5678/webhook/approval-dashboard",
+        "options": {
+          "responseCode": 303
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1072,
+        1296
+      ],
+      "id": "3f5a53bb-1fc9-4449-9dda-20ec7de335ce",
+      "name": "Respond to Webhook4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  config_key,\n  config_value\nFROM\n  workflow_config\nWHERE\n  config_key IN (\n    'selected_dev_server_name',\n    'selected_dev_database_name',\n    'selected_prod_server_name',\n    'selected_prod_database_name'\n  );"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        256,
+        64
+      ],
+      "id": "108a4123-04cf-4aa4-9f24-17653a1fb043",
+      "name": "Get Current Config",
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        336
+      ],
+      "id": "0d38f27f-3790-4d57-9d38-1f8c3643f447",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "filePath": "C:\\\\Users\\\\erp2\\\\Downloads\\\\cred.xlsx"
+      },
+      "name": "Read Excel",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        3488,
+        1152
+      ],
+      "id": "f3660595-7d63-4c09-8506-7f7f3ecc16f9"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "name": "Parse Excel",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [
+        3696,
+        1152
+      ],
+      "id": "e7eba9c6-e6d4-40c1-bdec-d11f20da923e"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Function node: Build SQL Credentials\nconst items = [];\n\nfor (const item of $input.all()) {\n  const json = item.json;\n  \n  // Build connection string\n  const connectionString = `Server=${json.server};Database=${json.database};User Id=${json.username};Password=${json.password};`;\n  \n  // Alternative: Build credential object\n  const credentials = {\n    server: json.server,\n    database: json.database,\n    username: json.username,\n    password: json.password,\n    port: json.port || 1533,\n    connectionString: connectionString\n  };\n  \n  items.push({\n    json: {\n      ...json,\n      sqlCredentials: credentials,\n      connectionString: connectionString\n    }\n  });\n}\n\nreturn items;"
+      },
+      "name": "Build Credentials",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        3920,
+        1152
+      ],
+      "id": "1613decc-8abf-4905-8e82-401e327fda37"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_config SET config_value = '{{ $json.body.dev_server }}' WHERE config_key = 'selected_dev_server_name';"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        3680,
+        1360
+      ],
+      "id": "425dada7-4aac-4bd8-a21f-cad4c594197a",
+      "name": "Save Dev Server2",
+      "credentials": {
+        "microsoftSql": {
+          "id": "uxvhUTO9RENOnwPZ",
+          "name": "SQL NODE"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fileSelector": "C:\\Users\\erp2\\.n8n-files\\cred.xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        752
+      ],
+      "id": "5f42c753-8bf3-4f7e-a83b-25699eba11f0",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        752
+      ],
+      "id": "d1af241a-d323-4576-9cac-55bdd768a10d",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        16,
+        928
+      ],
+      "id": "930b93de-16e8-44f3-89af-588602653f6e",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        256,
+        944
+      ],
+      "id": "11d813c2-f73b-4493-84cc-71a1b919d8ae"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        448,
+        560
+      ],
+      "id": "b7c2cb0a-5bff-4f2a-b8b9-66aa6197b448",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read webhook\nconst body = $items(\"Webhook3\")[0].json.body;\nconst prodServer = body.prod_server;\n\nif (!prodServer) {\n  return [{ json: { error: \"prod_server missing from webhook\" } }];\n}\n\n// Read merged rows\nconst rows = $items(\"Merge2\")[0].json.rows;\n\nconst norm = v => String(v).trim().toLowerCase();\n\nconst match = rows.find(\n  r => norm(r.ServerName) === norm(prodServer)\n);\n\nif (!match) {\n  return [{\n    json: {\n      error: \"No matching server found\",\n      prodServer,\n      availableServers: rows.map(r => r.ServerName)\n    }\n  }];\n}\n\n// OUTPUT ONE ITEM ONLY\nreturn [{\n  json: {\n    host: match.ServerName,\n    // FIX 2: Force port to be a Number using parseInt or Number()\n    port: Number(match.Port || 1433),\n    // FIX 1: Keep the trim() we added earlier\n    user: String(match.UserName).trim(),\n    password: String(match.Password).trim()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        752
+      ],
+      "id": "c6703883-025b-4ae1-9465-f62ad09051ed",
+      "name": "code"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the target server name from the Webhook node\n// We look back to \"Webhook3\" to see what server was requested\nconst webhookItems = $items(\"Webhook3\");\n\nif (!webhookItems.length || !webhookItems[0].json.body) {\n   throw new Error(\"Could not find Webhook3 data. Make sure the workflow started from the webhook.\");\n}\n\nconst targetServer = webhookItems[0].json.body.prod_server;\n\n// 2. Get the list of credentials from the current input\n// The \"Extract from File\" node outputs a list of items, so we use $input.all()\nconst allCredentials = $input.all();\n\n// Helper function to clean text (removes spaces and makes lowercase)\nconst normalize = (str) => String(str || '').trim().toLowerCase();\nconst targetNorm = normalize(targetServer);\n\n// 3. Find the matching server\n// We look through all items from the Excel file to find the matching ServerName\nconst match = allCredentials.find(item => \n  normalize(item.json.ServerName) === targetNorm\n);\n\nif (!match) {\n  const available = allCredentials.map(i => i.json.ServerName).join(', ');\n  throw new Error(`Server '${targetServer}' not found in the credentials file. Available: ${available}`);\n}\n\nconst data = match.json;\n\n// 4. Output the single clean credential object\nreturn [{\n  json: {\n    host: data.ServerName,\n    // FIX: Force port to be a Number (Integer)\n    port: parseInt(data.Port || 1433, 10),\n    // FIX: Remove hidden \"New Lines\" (\\n) or spaces from user/password\n    user: String(data.UserName).trim(),\n    password: String(data.Password).trim()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        608
+      ],
+      "id": "274e30e2-d0e5-4ab7-94e5-3fb6f0bca36a",
+      "name": "code1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT name\nFROM sys.databases\nWHERE database_id > 4 AND state = 0\nORDER BY name;\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        864,
+        720
+      ],
+      "id": "7c5f7307-297f-4a03-b32c-99c9c6197190",
+      "name": "sqlnode",
+      "credentials": {
+        "microsoftSql": {
+          "id": "89dkCN92I2Bp4BF5",
+          "name": "Microsoft SQL account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT name\nFROM sys.databases\nWHERE database_id > 4 AND state = 0\nORDER BY name;\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        256,
+        240
+      ],
+      "id": "0af22546-718b-4222-be85-d28928f9d5f0",
+      "name": "devdb",
+      "credentials": {
+        "microsoftSql": {
+          "id": "mOQ0HvgIxBpZushW",
+          "name": "devdb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect database names from all incoming items\nconst dbs = $input.all().map(i => i.json.name);\n\n// Get server names from ANY previous node (Webhook / config merge)\nconst prev = $items(\"Webhook3\")[0].json.body;\n\nreturn [{\n  json: {\n    dev_server: prev.dev_server,\n    prod_server: prev.prod_server,\n    databases: dbs\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        896
+      ],
+      "id": "0bb45119-28d3-47a9-bbf2-4fb554836125",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// holders\nlet devServer = '';\nlet prodServer = '';\n\nconst devDatabases = [];\nconst prodDatabases = [];\n\n// scan all incoming items\nfor (const item of items) {\n  const j = item.json || {};\n\n  // servers usually come from webhook body\n  if (j.body?.dev_server) devServer = j.body.dev_server;\n  if (j.body?.prod_server) prodServer = j.body.prod_server;\n\n  // databases come from SQL nodes\n  if (j.name && j.type === 'dev') devDatabases.push(j.name);\n  if (j.name && j.type === 'prod') prodDatabases.push(j.name);\n}\n\nreturn [{\n  json: {\n    dev_server: devServer,\n    prod_server: prodServer,\n    dev_databases: devDatabases,\n    prod_databases: prodDatabases\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        368
+      ],
+      "id": "8a9c7ea9-5069-49ba-9213-f4e138322cd4",
+      "name": "code2"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({\n  json: {\n    name: i.json.name,\n    type: 'dev'\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        208
+      ],
+      "id": "800dcfb3-e28d-4e8d-81bb-8d1c2d160b1e",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({\n  json: {\n    name: i.json.name,\n    type: 'prod'\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        592
+      ],
+      "id": "5a1a7ec9-08e6-408a-b012-469a44665921",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from workflow_config"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        1152
+      ],
+      "id": "4d40b202-58a1-4c8a-99a9-549c865baa0f",
+      "name": "Save Dev Server1",
+      "credentials": {
+        "microsoftSql": {
+          "id": "Beux02qalX5rIr1H",
+          "name": "Microsoft SQL account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "DJytcVGeFylrNeX5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/DJytcVGeFylrNeX5",
+          "cachedResultName": "sender231225"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        752,
+        1152
+      ],
+      "id": "f1235642-d6ee-49ec-b062-1ee37c73c27e",
+      "name": "Call 'sender291025"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "# Access data directly from the specific upstream nodes\n# Grabbing the target server name from the Webhook\nwebhook_data = _items(\"Webhook3\")[0].json['body']\ntarget_server_name = webhook_data.get('prod_server')\n\n# Grabbing the list of servers from the Excel extract output\n# Based on your screenshot, the data is in the 'rows' key of the first item\nexcel_output = _items(\"Extract Excel File\")\nserver_list = []\nif excel_output and 'rows' in excel_output[0].json:\n    server_list = excel_output[0].json['rows']\n\n# Helper function to normalize strings for comparison (trim and lowercase)\ndef normalize(s):\n    return str(s).strip().lower() if s else \"\"\n\ntarget_norm = normalize(target_server_name)\nmatched_credentials = None\n\n# Iterate through the list to find the matching server\nfor server_row in server_list:\n    if normalize(server_row.get('ServerName')) == target_norm:\n        # Found a match! Prepare the clean credentials data.\n        matched_credentials = {\n            \"host\": server_row.get('ServerName'),\n            # Force Port to be an integer. Default to 1433 if missing.\n            # This fixes the \"must be of type number\" error.\n            \"port\": int(server_row.get('Port', 1433)),\n            # Strip whitespace from username and password.\n            # This fixes the \"Login failed for user 'sa\\n'\" error.\n            \"user\": str(server_row.get('UserName', '')).strip(),\n            \"password\": str(server_row.get('Password', '')).strip()\n        }\n        break\n\n# Output the result\nif matched_credentials:\n    # Return the single credential object as a list item\n    return [{'json': matched_credentials}]\nelse:\n    # Stop the workflow with an error if server not found\n    raise Exception(f\"Server '{target_server_name}' not found in the credentials Excel file.\")"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        288
+      ],
+      "id": "0b1abeb4-32ca-4fda-b590-c57de5a8a171",
+      "name": "Code in Python (Native)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook2": {
+      "main": [
+        [
+          {
+            "node": "Get Current Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook3": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "devdb",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Fetch Dev DBs": {
+      "main": [
+        []
+      ]
+    },
+    "Generate HTML - Page 2": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook4": {
+      "main": [
+        [
+          {
+            "node": "Save Dev Server",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Dev DB",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Prod Server",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Prod DB",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Call 'sender291025",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Dev DB": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Save Dev Server": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Prod Server": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Save Prod DB": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Call 'sender291025",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Config": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Excel": {
+      "main": [
+        [
+          {
+            "node": "Parse Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Excel": {
+      "main": [
+        [
+          {
+            "node": "Build Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Credentials": {
+      "main": [
+        []
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "sqlnode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "code": {
+      "main": [
+        []
+      ]
+    },
+    "code1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "devdb": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sqlnode": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        []
+      ]
+    },
+    "code2": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML - Page 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Call 'sender291025": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in Python (Native)": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "acd20b0d-d253-44ad-a55a-8c3af550b48a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "48e133b341406c10ba914412567a3bd7df54048f04da58f11a9468e78bac8d34"
+  },
+  "id": "dGwuSEZ1ovLf7uMW",
+  "tags": []
+}

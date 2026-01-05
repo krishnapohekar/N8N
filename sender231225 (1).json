@@ -1,0 +1,580 @@
+{
+  "name": "sender231225",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from procedure_approvals\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1264,
+        1232
+      ],
+      "id": "9187c3a0-762b-4e70-9603-7754d071cd67",
+      "name": "changes in table1",
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT config_key, config_value\nFROM workflow_config\nWHERE config_key IN (\n  'selected_dev_server_name',\n  'selected_prod_server_name',\n  'selected_dev_database_name',\n  'selected_prod_database_name'\n);\n"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1472,
+        128
+      ],
+      "id": "53d25d21-82d2-4559-a607-8010251441e3",
+      "name": "Get Config DBs",
+      "executeOnce": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    sch.name AS SCHEMA_NAME,\n    p.name AS ROUTINE_NAME,\n    mod.definition AS DEFINITION\nFROM\n    sys.procedures AS p\nINNER JOIN\n    sys.sql_modules AS mod ON mod.object_id = p.object_id\nINNER JOIN\n    sys.schemas AS sch ON sch.schema_id = p.schema_id\nWHERE\n    p.is_ms_shipped = 0 -- Excludes system procedures\nORDER BY\n    sch.name, p.name;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -496,
+        128
+      ],
+      "id": "c7a934f5-8105-482a-ab4c-e327b8d4ee67",
+      "name": "development1",
+      "executeOnce": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "hi4siV82b53RI3WG",
+          "name": "harshalDEV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "dev_ROUTINE_NAME",
+              "field2": "prod_ROUTINE_NAME"
+            }
+          ]
+        },
+        "joinMode": "keepEverything",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        944,
+        208
+      ],
+      "id": "faa440e2-cd44-4a43-9542-dc6f6c84d07a",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Detects changes using normalized code, then generates a diff\n * including a summary and the full text of both definitions.\n */\nconst diff = require('diff');\nconst outputItems = [];\n\nfor (const item of $input.all()) {\n    const data = item.json;\n    \n    const normalizedCode1 = data.dev_NORMALIZED_CODE;\n    const normalizedCode2 = data.prod_NORMALIZED_CODE;\n    const definition1 = data.dev_DEFINITION; // Development code\n    const definition2 = data.prod_DEFINITION; // Production code\n\n    const name1 = (data.dev_SCHEMA_NAME || 'dev') + '.' + (data.dev_ROUTINE_NAME || 'unknown');\n    \n    let hasChanges = false;\n    let changeType = '';\n    let conciseDiffOutput = '';\n\n    // Case 1: Procedure exists in both environments\n    if (normalizedCode1 && normalizedCode2) {\n        if (normalizedCode1 !== normalizedCode2) {\n            hasChanges = true;\n            changeType = 'MODIFIED';\n            \n            const changes = diff.diffLines(definition2 || '', definition1 || '');\n            let devLineNum = 1, prodLineNum = 1;\n            const devLinesAdded = [], prodLinesRemoved = [];\n\n            changes.forEach(part => {\n                const numLines = part.count || 0;\n                if (part.added) {\n                    part.value.trimEnd().split('\\n').forEach(line => {\n                        devLinesAdded.push(`+ L${devLineNum}: ${line}`);\n                        devLineNum++;\n                    });\n                } else if (part.removed) {\n                    part.value.trimEnd().split('\\n').forEach(line => {\n                        prodLinesRemoved.push(`- L${prodLineNum}: ${line}`);\n                        prodLineNum++;\n                    });\n                } else {\n                    devLineNum += numLines;\n                    prodLineNum += numLines;\n                }\n            });\n            \n            let output = `Changes for ${name1}:\\n`;\n            if (devLinesAdded.length > 0) {\n                output += `\\n+++ Development Code (Added) +++\\n${devLinesAdded.join('\\n')}`;\n            }\n            if (prodLinesRemoved.length > 0) {\n                output += `\\n\\n--- Production Code (Removed) ---\\n${prodLinesRemoved.join('\\n')}`;\n            }\n            \n            // --- MODIFICATION START ---\n            // Store the diff-only summary\n            const diffSummary = output; \n\n            // Build the new comprehensive output\n            conciseDiffOutput = `\n--- CHANGE SUMMARY ---\n${diffSummary}\n\n--- FULL DEVELOPMENT CODE ---\n${definition1 || '(No code in development)'}\n\n--- FULL PRODUCTION CODE ---\n${definition2 || '(No code in production)'}\n`;\n            // --- MODIFICATION END ---\n        }\n    } \n    // Case 2: Procedure is missing from one environment\n    else {\n        if (normalizedCode1 && !normalizedCode2) {\n            hasChanges = true;\n            changeType = 'NEW';\n            \n            // --- MODIFICATION START ---\n            conciseDiffOutput = `\n--- CHANGE SUMMARY ---\nThis procedure is new and exists only in the Development environment.\n\n--- FULL DEVELOPMENT CODE ---\n${definition1 || 'N/A'}\n\n--- FULL PRODUCTION CODE ---\n(No code in production)\n`;\n            // --- MODIFICATION END ---\n        } \n        else if (!normalizedCode1 && normalizedCode2) {\n            hasChanges = true;\n            changeType = 'DELETED';\n            \n            // --- MODIFICATION START ---\n            conciseDiffOutput = `\n--- CHANGE SUMMARY ---\nThis procedure exists in Production but has been removed from the Development environment.\n\n--- FULL DEVELOPMENT CODE ---\n(No code in development)\n\n--- FULL PRODUCTION CODE ---\n${definition2 || 'N/A'}\n`;\n            // --- MODIFICATION END ---\n        }\n    }\n    \n    // Only add item to the output if a change was detected\n    if (hasChanges) {\n        const outputData = {\n            procedure_name: (data.dev_SCHEMA_NAME || data.prod_SCHEMA_NAME || 'dbo') + '.' + (data.dev_ROUTINE_NAME || data.prod_ROUTINE_NAME),\n            change_type: changeType,\n            changes_only: conciseDiffOutput,\n            // Pass the original dev definition for the 'approve' logic\n            dev_DEFINITION: definition1 \n        };\n        outputItems.push({ json: outputData });\n    }\n}\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        144
+      ],
+      "id": "b2095431-7421-4916-99ee-5871e9397634",
+      "name": "data diff1"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Normalizes and prefixes fields for an environment.\n */\nconst outputItems = [];\n\nfor (const item of $input.all()) {\n    const procedure = item.json;\n    let text = procedure.DEFINITION || '';\n\n    // --- Normalization Logic ---\n    text = text.replace(/\\/\\**?\\*\\//g, '');      // Remove multi-line comments\n    text = text.replace(/--.*$/gm, '');          // Remove single-line comments\n    text = text.replace(/^\\s*GO\\s*$/gmi, '');    // Remove GO statements\n    text = text.replace(/(\\r\\n|\\r)/g, '\\n');     // Standardize line endings\n    text = text.replace(/[ \\t]{2,}/g, ' ');      // Normalize spacing\n    text = text.replace(/^[ \\t]+|[ \\t]+$/gm, ''); // Trim each line\n    text = text.replace(/(\\n){2,}/g, '\\n');      // Remove empty lines\n    text = text.trim();                          // Final trim\n\n    // **NEW STEP:** Convert everything to lowercase to ignore case differences.\n    text = text.toLowerCase();\n    \n    // --- The rest of your specific dev/prod prefixing logic remains the same ---\n    // (This example is for the 'normalize 1' (dev) node)\n    const devData = {\n      dev_ROUTINE_NAME: procedure.ROUTINE_NAME,\n      dev_SCHEMA_NAME: procedure.SCHEMA_NAME,\n      dev_DEFINITION: procedure.DEFINITION,\n      dev_NORMALIZED_CODE: text\n    };\n    \n    outputItems.push({ json: devData });\n}\n\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        128
+      ],
+      "id": "8cb43b66-d97b-4e9d-b80a-6f96646ed8a5",
+      "name": "normallize "
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Normalizes and prefixes fields for the PRODUCTION environment.\n */\nconst outputItems = [];\n\nfor (const item of $input.all()) {\n    const procedure = item.json;\n    let text = procedure.DEFINITION || '';\n\n    // --- Your normalization logic (regex replaces) stays the same ---\n    text = text.replace(/\\/\\**?\\*\\//g, '');      // Remove multi-line comments\n    text = text.replace(/--.*$/gm, '');          // Remove single-line comments\n    text = text.replace(/^\\s*GO\\s*$/gmi, '');    // Remove GO statements\n    text = text.replace(/(\\r\\n|\\r)/g, '\\n');     // Standardize line endings\n    text = text.replace(/[ \\t]{2,}/g, ' ');      // Normalize spacing\n    text = text.replace(/^[ \\t]+|[ \\t]+$/gm, ''); // Trim each line\n    text = text.replace(/(\\n){2,}/g, '\\n');      // Remove empty lines\n    text = text.trim();                          // Final trim\n    // -------------------------------------------------------------\ntext = text.toLowerCase();\n    // Create a new clean object with prefixed names\n    const prodData = {\n      prod_ROUTINE_NAME: procedure.ROUTINE_NAME,\n      prod_SCHEMA_NAME: procedure.SCHEMA_NAME,\n      prod_DEFINITION: procedure.DEFINITION,\n      prod_NORMALIZED_CODE: text\n    };\n    \n    outputItems.push({ json: prodData });\n}\n\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        480
+      ],
+      "id": "81777f17-1c8f-4ef9-b866-a47dff9c4440",
+      "name": "normallize 3"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Get the selected DB names from the config node\nDECLARE @DevDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_dev_database_name').json.config_value }}';\nDECLARE @ProdDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_prod_database_name').json.config_value }}';\n\n-- 2. Merge the NEW list of changes\nMERGE procedure_approvals AS target\nUSING (SELECT\n  @DevDB AS dev_database,\n  @ProdDB AS prod_database,\n  '{{ $json.procedure_name.replace(/'/g, \"''\") }}' AS procedure_name,\n  '{{ $json.change_type.replace(/'/g, \"''\") }}' AS change_type,\n  '{{ $json.changes_only.replace(/'/g, \"''\") }}' AS changes_only,\n  '{{ $json.dev_DEFINITION.replace(/'/g, \"''\") }}' AS dev_definition\n) AS source\n-- 3. Match on all three parts of the composite key\nON (target.procedure_name = source.procedure_name \n    AND target.dev_database = source.dev_database \n    AND target.prod_database = source.prod_database)\n-- If a match is found (it's an existing procedure for this DB pair)\nWHEN MATCHED THEN\n  UPDATE SET\n    change_type = source.change_type,\n    changes_only = source.changes_only,\n    dev_definition = source.dev_definition,\n    status = 'pending'\n-- If it's a new procedure for this DB pair\nWHEN NOT MATCHED THEN\n  INSERT (dev_database, prod_database, procedure_name, change_type, changes_only, dev_definition, status)\n  VALUES (source.dev_database, source.prod_database, source.procedure_name, source.change_type, source.changes_only, source.dev_definition, 'pending');"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1488,
+        144
+      ],
+      "id": "e6190130-d582-48de-a7ee-85cd3ac677dc",
+      "name": "changes in table2",
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    sch.name AS SCHEMA_NAME,\n    p.name AS ROUTINE_NAME,\n    mod.definition AS DEFINITION\nFROM\n    sys.procedures AS p\nINNER JOIN\n    sys.sql_modules AS mod ON mod.object_id = p.object_id\nINNER JOIN\n    sys.schemas AS sch ON sch.schema_id = p.schema_id\nWHERE\n    p.is_ms_shipped = 0 -- Excludes system procedures\nORDER BY\n    sch.name, p.name;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        1648
+      ],
+      "id": "2c7a1198-7476-4988-9136-276a81b29e4e",
+      "name": "production1",
+      "credentials": {
+        "microsoftSql": {
+          "id": "DpGcknT7buqSILWR",
+          "name": "harshalPROD"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "34263af1-d798-4017-b744-8601df264258",
+              "leftValue": "={{ $json.config_key }}",
+              "rightValue": "selected_dev_database_name",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -512,
+        -272
+      ],
+      "id": "ccf89864-0ebc-45cb-9d71-333fe59ca371",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = {};\n\nfor (const item of $input.all()) {\n  const key = item.json.config_key;\n  const value = item.json.config_value;\n\n  if (key === 'selected_prod_server_name') out.prod_server = value;\n  if (key === 'selected_prod_database_name') out.prod_database = value;\n  if (key === 'selected_dev_server_name') out.dev_server = value;\n  if (key === 'selected_dev_database_name') out.dev_database = value;\n}\n\nreturn [{ json: out }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        352
+      ],
+      "id": "4b758766-29d5-472c-a2a0-cedf6736b869",
+      "name": "normalizze"
+    },
+    {
+      "parameters": {
+        "fileSelector": "C:\\Users\\erp2\\.n8n-files\\cred.xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -848,
+        624
+      ],
+      "id": "9367f8e8-85f6-42d3-9921-d7862aeb75b9",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        624
+      ],
+      "id": "26d5d027-13be-4837-bcda-1a3f4da06237",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the Configuration (Server & DB) from the \"normalizze\" node\n// We use $items() to fetch the specific config data from upstream\nconst configItems = $items(\"normalizze\");\n\nif (!configItems.length) {\n   throw new Error(\"Could not find configuration data from 'normalizze' node.\");\n}\n\nconst targetServer = configItems[0].json.prod_server;\nconst targetDatabase = configItems[0].json.prod_database; // <--- Getting the DB name\n\n// 2. Get the list of credentials from the \"code1\" node (Excel data)\nconst allCredentials = $items(\"code1\");\n\n// Helper function to clean text\nconst normalize = (str) => String(str || '').trim().toLowerCase();\nconst targetNorm = normalize(targetServer);\n\n// 3. Find the matching server\nconst match = allCredentials.find(item => \n  normalize(item.json.ServerName) === targetNorm\n);\n\nif (!match) {\n  const available = allCredentials.map(i => i.json.ServerName).join(', ');\n  throw new Error(`Server '${targetServer}' not found in credentials. Available: ${available}`);\n}\n\nconst data = match.json;\n\n// 4. Output Credentials + Database Name together\nreturn [{\n  json: {\n    host: data.ServerName,\n    port: parseInt(data.Port || 1433, 10),\n    user: String(data.UserName).trim(),\n    password: String(data.Password).trim(),\n    database: targetDatabase // <--- We add the database here!\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        368
+      ],
+      "id": "43d402c4-017b-4604-81a7-15b0637bb6f3",
+      "name": "match creds"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sql = require('mssql');\nconst cfg = $input.first().json;\n\nconst config = {\n  user: cfg.user,\n  password: cfg.password,\n  server: cfg.server,\n  port: cfg.port,\n  database: cfg.database,\n  options: {\n    encrypt: false,\n    trustServerCertificate: true\n  }\n};\n\nlet pool;\ntry {\n  pool = await sql.connect(config);\n\n  const result = await pool.request().query(`\n    SELECT\n        sch.name AS schema_name,\n        p.name AS routine_name,\n        mod.definition AS definition\n    FROM sys.procedures AS p\n    INNER JOIN sys.sql_modules AS mod\n        ON mod.object_id = p.object_id\n    INNER JOIN sys.schemas AS sch\n        ON sch.schema_id = p.schema_id\n    WHERE p.is_ms_shipped = 0\n    ORDER BY sch.name, p.name;\n  `);\n\n  await pool.close();\n\n  return [{\n    json: {\n      server: cfg.server,\n      database: cfg.database,\n      procedures: result.recordset\n    }\n  }];\n\n} catch (err) {\n  if (pool) await pool.close();\n  throw err;\n}\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        1024
+      ],
+      "id": "d92fe5fe-2173-42c7-bcaf-33817e12488c",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        272,
+        704
+      ],
+      "id": "d5aea27c-2afc-4913-8b25-0484295f0f7a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Function node: merge all incoming sheet items into single item\n// Output: [{ json: { rows: [ ... ] } }]\nconst incoming = $items();\n\n// If incoming is already a single item with rows, just pass it through\nif (incoming.length === 1 && incoming[0].json && Array.isArray(incoming[0].json.rows)) {\n  return incoming;\n}\n\n// Otherwise, collect all .json payloads into rows\nconst rows = incoming.map(it => it.json || {});\nreturn [{ json: { rows } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        624
+      ],
+      "id": "962f14b1-dd4b-4654-ab1a-dd472ea42349",
+      "name": "code1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -128,
+        640
+      ],
+      "id": "71576f7a-44c6-48ab-b5f8-a91ddeb62475",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1664,
+        144
+      ],
+      "id": "2bf17db4-e29d-4c6d-964d-69d52bc6e975",
+      "name": "kp"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    sch.name AS SCHEMA_NAME,\n    p.name AS ROUTINE_NAME,\n    mod.definition AS DEFINITION\nFROM\n    sys.procedures AS p\nINNER JOIN\n    sys.sql_modules AS mod ON mod.object_id = p.object_id\nINNER JOIN\n    sys.schemas AS sch ON sch.schema_id = p.schema_id\nWHERE\n    p.is_ms_shipped = 0 -- Excludes system procedures\nORDER BY\n    sch.name, p.name;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        480
+      ],
+      "id": "99667ddc-6bad-4caf-b78f-b1ca1d323a21",
+      "name": "sqlnode",
+      "alwaysOutputData": false,
+      "credentials": {
+        "microsoftSql": {
+          "id": "89dkCN92I2Bp4BF5",
+          "name": "Microsoft SQL account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -432,
+        1680
+      ],
+      "id": "8476631d-1467-4396-86c9-7d07872df0f5",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        1696
+      ],
+      "id": "74f210e1-06d4-4e0b-b9e1-1972eec5acc1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get Config DBs": {
+      "main": [
+        [
+          {
+            "node": "normalizze",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "development1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "development1": {
+      "main": [
+        [
+          {
+            "node": "normallize ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "data diff1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "data diff1": {
+      "main": [
+        [
+          {
+            "node": "changes in table2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "normallize ": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "normallize 3": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "production1": {
+      "main": [
+        []
+      ]
+    },
+    "If": {
+      "main": [
+        [],
+        []
+      ]
+    },
+    "normalizze": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "match creds": {
+      "main": [
+        [
+          {
+            "node": "sqlnode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        []
+      ]
+    },
+    "Merge": {
+      "main": [
+        []
+      ]
+    },
+    "code1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "kp": {
+      "main": [
+        [
+          {
+            "node": "Get Config DBs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "match creds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sqlnode": {
+      "main": [
+        [
+          {
+            "node": "normallize 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "29616ba8-54c8-4218-94f2-4846dee383ad",
+  "meta": {
+    "instanceId": "48e133b341406c10ba914412567a3bd7df54048f04da58f11a9468e78bac8d34"
+  },
+  "id": "DJytcVGeFylrNeX5",
+  "tags": []
+}

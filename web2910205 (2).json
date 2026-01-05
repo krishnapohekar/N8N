@@ -1,0 +1,562 @@
+{
+  "name": "web2910205",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "approval-dashboard",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2368,
+        -64
+      ],
+      "id": "38dfa764-179b-4f80-bdb2-60d1426d0a75",
+      "name": "Webhook",
+      "webhookId": "e0634ab5-6020-4173-a968-142be7b28195"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c342990b-893e-413e-8bfe-306990e01e8f",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1920,
+        144
+      ],
+      "id": "9ce28f4a-4487-43da-a8d1-7d6924cf8ca9",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const pendingChanges = $input.all();\n\n// *** CRITICAL FIX: Ensure this URL matches your POST webhook's PRODUCTION path ***\nconst postUrl = \"http://localhost:5678/webhook/approval-dashboard\"; \n\n// Helper function to safely escape HTML special characters\nfunction safe(s) {\n  if (s === null || s === undefined) return '';\n  return String(s)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;'); // Use HTML entity for single quotes\n}\n\nlet html = `\n<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Approval Dashboard</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap\" rel=\"stylesheet\"><style>body{font-family:'Roboto',sans-serif;background-color:#f0f2f5;color:#333;margin:0;padding:2em;}.container{max-width:900px;margin:0 auto;}header{background-color:#ffffff;padding:1.5em 2em;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.05);margin-bottom:2em;}header h1{margin:0;color:#1a2c4e;font-size:1.8em;}.procedure{background-color:#ffffff;border:1px solid #e0e0e0;border-radius:10px;padding:1.5em;margin-bottom:1.5em;box-shadow:0 4px 6px rgba(0,0,0,0.05);transition:transform 0.2s ease-in-out;}.procedure:hover{transform:translateY(-5px);}.procedure-header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;padding-bottom:1em;margin-bottom:1em;}.procedure-header h3{margin:0;font-family:monospace;font-size:1.2em;color:#0d1b2a;}.change-type{background-color:#e7f3ff;color:#005fcc;padding:0.3em 0.8em;border-radius:15px;font-size:0.8em;font-weight:500;}pre{background-color:#f8f9fa;padding:1em;white-space:pre-wrap;border:1px solid #e0e0e0;border-radius:5px;font-family:monospace;font-size:0.9em;line-height:1.5;}.actions{margin-top:1.5em;text-align:right;}button{padding:0.7em 1.5em;border:none;border-radius:5px;cursor:pointer;font-size:0.9em;font-weight:500;transition:background-color 0.2s;margin-left:0.5em;}.approve{background-color:#28a745;color:white;}.approve:hover{background-color:#218838;}.reject{background-color:#dc3545;color:white;}.reject:hover{background-color:#c82333;}</style></head><body><div class=\"container\"><header><h1>Pending Procedure Approvals</h1></header>\n`;\n\nif (pendingChanges.length === 0) {\n    html += '<div class=\"procedure\"><p>✅ No pending changes to review.</p></div>';\n} else {\n    for (const item of pendingChanges) {\n        const data = item.json;\n        // Safely get definition and check if change is DELETED\n        const encodedDefinition = safe(data.dev_definition); \n        const changes = safe(data.changes_only || 'No diff details available.');\n        const isDeleted = data.change_type === 'DELETED';\n\n        html += `\n            <div class=\"procedure\">\n                <div class=\"procedure-header\">\n                    <h3>${safe(data.procedure_name)}</h3>\n                    <span class=\"change-type\">${safe(data.change_type)}</span>\n                </div>\n                <pre>${changes}</pre>\n                <div class=\"actions\">\n                    <form action=\"${postUrl}\" method=\"POST\" style=\"display:inline;\">\n                        <input type=\"hidden\" name=\"procedure_name\" value=\"${safe(data.procedure_name)}\">\n                        <input type=\"hidden\" name=\"decision\" value=\"reject\">\n                        <button type=\"submit\" class=\"reject\">Reject</button>\n                    </form>\n                    <form action=\"${postUrl}\" method=\"POST\" style=\"display:inline;\">\n                        <input type=\"hidden\" name=\"procedure_name\" value=\"${safe(data.procedure_name)}\">\n                        <input type=\"hidden\" name=\"decision\" value=\"approve\">\n                        <input type=\"hidden\" name=\"dev_definition\" value='${encodedDefinition}'>\n                        <button type=\"submit\" class=\"approve\" ${isDeleted ? 'disabled' : ''}>Approve</button>\n                    </form>\n                </div>\n            </div>`;\n    }\n}\nhtml += '</div></body></html>';\n\nreturn { htmlResponse: html };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1792,
+        -80
+      ],
+      "id": "291bc7a9-09e9-4576-ab4f-2d3455ae108b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DECLARE @DevDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_dev_database_name').json.config_value }}';\nDECLARE @ProdDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_prod_database_name').json.config_value }}';\n\nUPDATE procedure_approvals\nSET status = 'rejected'\nWHERE \n  -- ** THIS IS THE FIX **\n  procedure_name = '{{ $json.procedure_name.trim().replace(/'/g, \"''\") }}' \n  AND dev_database = @DevDB\n  AND prod_database = @ProdDB;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1504,
+        288
+      ],
+      "id": "4c813b4a-005f-4938-bebc-b1663b59f5d7",
+      "name": "reject",
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DECLARE @DevDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_dev_database_name').json.config_value }}';\nDECLARE @ProdDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_prod_database_name').json.config_value }}';\n\nUPDATE procedure_approvals\nSET status = 'approved'\nWHERE \n  -- ** THIS IS THE FIX **\n  procedure_name = '{{ $items(\"If\")[0].json.procedure_name.replace(/'/g, \"''\") }}' \n  AND dev_database = @DevDB\n  AND prod_database = @ProdDB;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -112,
+        -128
+      ],
+      "id": "0fcf6032-bf18-4df8-ba19-6721a6ea626a",
+      "name": "approe",
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.htmlResponse }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1520,
+        -112
+      ],
+      "id": "42e50883-e58e-49f7-bace-5bd6c95c46d0",
+      "name": "Respond to Webhook2"
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "http://localhost:5678/webhook/approval-dashboard",
+        "options": {
+          "responseCode": 303
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -336,
+        240
+      ],
+      "id": "b0cff70d-5dba-4496-ad81-5119e6c3b449",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    mod.definition AS dev_definition_latest\nFROM \n    sys.procedures AS p\nINNER JOIN \n    sys.sql_modules AS mod ON mod.object_id = p.object_id\nINNER JOIN \n    sys.schemas AS sch ON sch.schema_id = p.schema_id\nWHERE \n    sch.name + '.' + p.name = '{{ $json.procedure_name }}';"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1632,
+        48
+      ],
+      "id": "24d25c88-eee3-4ab6-8d16-bcaa9ffe946e",
+      "name": "Get Dev Definition",
+      "credentials": {
+        "microsoftSql": {
+          "id": "hi4siV82b53RI3WG",
+          "name": "harshalDEV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $node[\"Prepare Deploy SQL\"].json.deploySql }}"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -528,
+        -128
+      ],
+      "id": "c269d608-83c5-49fe-9440-0dbf6adc9005",
+      "name": "Deploy to Production",
+      "credentials": {
+        "microsoftSql": {
+          "id": "DpGcknT7buqSILWR",
+          "name": "harshalPROD"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approval-dashboard",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2384,
+        96
+      ],
+      "id": "be4f93da-a72a-4f33-b1db-dbc6cc9f36cd",
+      "name": "Webhook1",
+      "webhookId": "e0634ab5-6020-4173-a968-142be7b28195"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get DB names from the config node (adjust node name if different)\nDECLARE @DevDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_dev_database_name').json.config_value }}';\nDECLARE @ProdDB NVARCHAR(255) = '{{ $items(\"Get Config DBs\").find(item => item.json.config_key === 'selected_prod_database_name').json.config_value }}';\n\nSELECT change_type \nFROM procedure_approvals \nWHERE procedure_name = '{{ $items(\"If\")[0].json.procedure_name.replace(/'/g, \"''\") }}' -- ** THIS IS THE FIX **\n  AND dev_database = @DevDB\n  AND prod_database = @ProdDB;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1296,
+        32
+      ],
+      "id": "d484c99e-8b66-4613-b54c-532a6d7868b6",
+      "name": "Get Change Type",
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the data from the SPECIFIC previous nodes by their names\nconst devDefinitionData = $items(\"Get Dev Definition\")[0].json; \nconst changeTypeData = $items(\"Get Change Type\")[0].json;\n\n// Extract the values\nconst definition = devDefinitionData.dev_definition_latest;\nconst changeType = changeTypeData.change_type;\n\nlet deploySql = definition; // Default to the original definition (CREATE)\n\n// If the change type is MODIFIED, change CREATE to ALTER\nif (changeType === 'MODIFIED' && definition) {\n  // Use a case-insensitive regex to replace the first occurrence of CREATE PROCEDURE\n  deploySql = definition.replace(/^(\\s*)CREATE(\\s+)PROCEDURE/i, '$1ALTER$2PROCEDURE');\n} else if (changeType === 'NEW' && definition) {\n  // Ensure NEW procedures also use the fetched definition\n  deploySql = definition; \n} else {\n  // Handle cases where definition might be missing or changeType is unexpected\n  console.error(\"Could not prepare deploy SQL. ChangeType:\", changeType, \"Definition available:\", !!definition);\n  deploySql = null; // Prevent deploying invalid SQL\n}\n\n// Return the final SQL command (or null if there was an issue)\nif (deploySql) {\n  return {\n    json: {\n      deploySql: deploySql\n    }\n  };\n} else {\n  // If deploySql is null, return nothing to stop the 'Deploy' node\n  return []; \n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        -160
+      ],
+      "id": "b30682b6-1f68-442b-a1bb-1fa5a0143956",
+      "name": "Prepare Deploy SQL"
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log(\"APPROVE path: Preparing to deploy for procedure:\", $items(\"Get Dev Definition\")[0].json.procedure_name); // Assuming procedure_name is available earlier\nconsole.log(\"Deploy SQL:\", $input.item.json.deploySql); // Log the SQL generated by 'Prepare Deploy SQL'\nreturn $input.item.json; // Pass data along"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        -160
+      ],
+      "id": "363b392d-e809-4893-a2a2-29ec5e81cf9f",
+      "name": "log"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the procedure name from the IF node (adjust name if needed)\n// *** THIS IS THE CRITICAL CHANGE ***\nconst procedureName = $items(\"If\")[0].json.procedure_name || 'unknown procedure';\n\nconsole.log(\"Deploy to Production node finished for:\", procedureName);\n\n// Get the output from the Deploy node (which is the input to this node)\nconst deployOutput = $input.item.json; \nconsole.log(\"Deploy Output:\", deployOutput); \n\n// Add the procedureName to the output for the next node\ndeployOutput.procedure_name = procedureName; \n\n// Pass the combined data along\nreturn deployOutput;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -144
+      ],
+      "id": "fc012c21-2ae4-49df-9fbe-0940e8b89d5d",
+      "name": "log1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT config_key, config_value FROM workflow_config WHERE config_key LIKE 'selected_%_database_name';"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -2176,
+        112
+      ],
+      "id": "bdadf9ba-8ce4-48d4-b5c1-888f9a55c276",
+      "name": "Get Config DBs",
+      "executeOnce": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// lg1 Code Node (after IF false)\nconsole.log(\"REJECT path started for procedure:\", $input.item.json.procedure_name);\n\n// Pass the incoming data directly to the next node\nreturn $input.item.json;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1744,
+        176
+      ],
+      "id": "5e68e4ac-bde8-4280-8ac2-d8e0cff73862",
+      "name": "lg1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "console.log(\"POST Webhook Triggered. Received data:\", $input.item.json.body);\nreturn $input.item.json.body; // Return ONLY the body"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        352
+      ],
+      "id": "b476db8b-58e1-4bb0-b7de-e284db535ae8",
+      "name": "lg"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT config_key, config_value \nFROM workflow_config \nWHERE config_key LIKE 'selected_%_database_name';"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -2160,
+        -64
+      ],
+      "id": "4980c86d-09c9-4d99-b7d1-a2b2841ad4f4",
+      "name": "Get Config GET",
+      "executeOnce": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "guBbyiEEViXU11Sb",
+          "name": "data credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get DB names from the config node (adjust node name if different)\n\nDECLARE @DevDB NVARCHAR(255) = '{{ $items(\"Get Config GET\").find(item => item.json.config_key === 'selected_dev_database_name').json.config_value }}';\n\nDECLARE @ProdDB NVARCHAR(255) = '{{ $items(\"Get Config GET\").find(item => item.json.config_key === 'selected_prod_database_name').json.config_value }}';\n\n\n\nSELECT * FROM procedure_approvals \n\nWHERE status = 'pending'\n\n  AND dev_database = @DevDB\n\n  AND prod_database = @ProdDB;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1984,
+        -128
+      ],
+      "id": "f3d0d7a7-df7e-412b-adc6-da77432a5938",
+      "name": "ge procedure",
+      "executeOnce": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "qVCA7fjhF2t22kHc",
+          "name": "Microsoft SQL account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Config GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Get Dev Definition",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "lg1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "approe": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reject": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dev Definition": {
+      "main": [
+        [
+          {
+            "node": "Get Change Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy to Production": {
+      "main": [
+        [
+          {
+            "node": "log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Get Config DBs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "lg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Deploy SQL": {
+      "main": [
+        [
+          {
+            "node": "log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Change Type": {
+      "main": [
+        [
+          {
+            "node": "Prepare Deploy SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log": {
+      "main": [
+        [
+          {
+            "node": "Deploy to Production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log1": {
+      "main": [
+        [
+          {
+            "node": "approe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Config DBs": {
+      "main": [
+        []
+      ]
+    },
+    "lg1": {
+      "main": [
+        [
+          {
+            "node": "reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "lg": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Config GET": {
+      "main": [
+        [
+          {
+            "node": "ge procedure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ge procedure": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6e5e95a6-7d9a-4ca3-a95e-2b8d91d3cd12",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "48e133b341406c10ba914412567a3bd7df54048f04da58f11a9468e78bac8d34"
+  },
+  "id": "sLD4MatKYzPoCLGQ",
+  "tags": []
+}
