@@ -107,8 +107,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        80,
-        128
+        160,
+        16
       ],
       "id": "8cb43b66-d97b-4e9d-b80a-6f96646ed8a5",
       "name": "normallize "
@@ -242,13 +242,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// 1. Get the Configuration (Server & DB) from the \"normalizze\" node\n// We use $items() to fetch the specific config data from upstream\nconst configItems = $items(\"normalizze\");\n\nif (!configItems.length) {\n   throw new Error(\"Could not find configuration data from 'normalizze' node.\");\n}\n\nconst targetServer = configItems[0].json.prod_server;\nconst targetDatabase = configItems[0].json.prod_database; // <--- Getting the DB name\n\n// 2. Get the list of credentials from the \"code1\" node (Excel data)\nconst allCredentials = $items(\"code1\");\n\n// Helper function to clean text\nconst normalize = (str) => String(str || '').trim().toLowerCase();\nconst targetNorm = normalize(targetServer);\n\n// 3. Find the matching server\nconst match = allCredentials.find(item => \n  normalize(item.json.ServerName) === targetNorm\n);\n\nif (!match) {\n  const available = allCredentials.map(i => i.json.ServerName).join(', ');\n  throw new Error(`Server '${targetServer}' not found in credentials. Available: ${available}`);\n}\n\nconst data = match.json;\n\n// 4. Output Credentials + Database Name together\nreturn [{\n  json: {\n    host: data.ServerName,\n    port: parseInt(data.Port || 1433, 10),\n    user: String(data.UserName).trim(),\n    password: String(data.Password).trim(),\n    database: targetDatabase // <--- We add the database here!\n  }\n}];"
+        "jsCode": "// 1. Get the Configuration (Server & DB) from the \"normalizze\" node\nconst configItems = $items(\"normalizze\");\n\nif (!configItems.length) {\n   throw new Error(\"Could not find configuration data from 'normalizze' node.\");\n}\n\nconst targetServer = configItems[0].json.prod_server;\nconst targetDatabase = configItems[0].json.prod_database;\n\n// 2. Get the list of credentials from the CURRENT input (Merge2)\n// *** FIX: We access the 'rows' array seen in your screenshot ***\nconst inputItem = $input.first();\nconst credentialsList = inputItem.json.rows;\n\nif (!credentialsList || !Array.isArray(credentialsList)) {\n  throw new Error(\"Could not find 'rows' array in input. Check the Merge2 node output.\");\n}\n\n// Helper function to clean text (removes spaces and handles case sensitivity)\nconst normalize = (str) => String(str || '').trim().toLowerCase();\nconst targetNorm = normalize(targetServer);\n\n// 3. Find the matching server inside the rows list\nconst match = credentialsList.find(row => \n  normalize(row.ServerName) === targetNorm\n);\n\nif (!match) {\n  // If not found, list available servers in the error message for debugging\n  const available = credentialsList.map(r => r.ServerName).join(', ');\n  throw new Error(`Server '${targetServer}' not found in credentials. Available: ${available}`);\n}\n\n// 4. Output the Clean Credentials + Database\nreturn [{\n  json: {\n    host: match.ServerName,\n    port: parseInt(match.Port || 1433, 10),\n    user: String(match.UserName).trim(),\n    password: String(match.Password).trim(),\n    database: targetDatabase\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        80,
-        368
+        96,
+        528
       ],
       "id": "43d402c4-017b-4604-81a7-15b0637bb6f3",
       "name": "match creds"
@@ -571,7 +571,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "29616ba8-54c8-4218-94f2-4846dee383ad",
+  "versionId": "7ba523c8-724c-4812-a1ff-b143fe1768fc",
   "meta": {
     "instanceId": "48e133b341406c10ba914412567a3bd7df54048f04da58f11a9468e78bac8d34"
   },
